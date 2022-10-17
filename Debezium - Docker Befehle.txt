@@ -1,0 +1,29 @@
+//Postgresql-Datenbanken erstellen
+docker run -it --rm --name postgres -p 5432:5432 -e POSTGRES_PASSWORD=password debezium/postgres:13
+docker run -it --rm --name postgres2 -p 5433:5433 -e POSTGRES_PASSWORD=password debezium/postgres:13
+
+//Erstellen der Daten in der Datenbank
+pgcli -h localhost -p 5432 -U postgres -> password
+CREATE SCHEMA siemens;
+SET search_path TO siemens,public;
+CREATE TABLE siemens.asset (id varchar(20),merckName varchar(20),merckType varchar(20),type varchar(20),mlfb varchar(20),status varchar(20),region varchar(20),country varchar(20),city varchar(20),shopFloor varchar(20),vendor varchar(20),articleNumber varchar(20),picture varchar(20),sapName varchar(20),swVersion varchar(20),hwVersion varchar(20),fwVersion varchar(20),cpuType varchar(20),memoryType varchar(20),cpuLoad varchar(20),endOfLifecycleSW varchar(20),endOfLifecycleHW varchar(20),endOfLifecycleFW varchar(20),date varchar(20),reason varchar(20),errorStatus varchar(20),primary key(id));
+ALTER TABLE siemens.asset replica identity FULL;
+insert into siemens.asset values ('1','PL-50001','Main rack','PS 307 5A', '234-423-234','active','Europe','Germany','Essen','1','Siemens','123-456-789','1','XQL-QWE-WQE','V2.1','V1.4','V1.8','Type1','Type3','34','01.01.2022','01.02.2022','01.10.2022','28.10.2021','Power Failure','Error 123');
+
+//Anlegen von Zookeeper -> cluster management
+docker run -it --rm --name zookeeper -p 2181:2181 -p 2888:2888 -p 3888:3888 quay.io/debezium/zookeeper:1.9
+
+//Anlegen von einem Kafkabroker
+docker run -it --rm --name kafka -p 9092:9092 --link zookeeper:zookeeper quay.io/debezium/kafka:1.9
+
+//Kafka connect führt debezium aus -> liest daten aus der datenbank und schreibt diese in das kafka topic
+docker run -it --rm --name connect -p 8083:8083 --link kafka:kafka --link postgres:postgres -e BOOTSTRAP_SERVERS=kafka:9092 -e GROUP_ID=sde_group -e CONFIG_STORAGE_TOPIC=sde_storage_topic -e OFFSET_STORAGE_TOPIC=sde_offset_topic debezium/connect:1.9
+
+//Registrieren des Debezium connect services auf dem port 8083
+curl -i -X POST -H "Accept:application/json" -H "Content-Type:application/json" localhost:8083/connectors/ -d "{"""name""": """sde-connector""", """config""": {"""connector.class""": """io.debezium.connector.postgresql.PostgresConnector""", """database.hostname""": """postgres""", """database.port""": """5432""", """database.user""": """postgres""", """database.password""": """password""", """database.dbname""" : """postgres""", """database.server.name""": """siemensserver1""", """table.whitelist""": """siemens.asset"""}}"
+
+//KafkaConsumer Docker build
+docker build -t consumer .
+
+//Kafka Consumer ausführen (Dockerfile) -> Führt script kafka_consumer.py aus (Verbindung zu Kafka und 2. Datenbank)
+docker run -it --rm --link kafka:kafka --link postgres2:postgres2 consumer
